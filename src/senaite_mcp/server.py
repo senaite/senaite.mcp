@@ -2,6 +2,7 @@
 """FastMCP server exposing SENAITE JSON API operations as tools."""
 
 import argparse
+import logging
 import os
 import sys
 from typing import Any, Optional
@@ -124,6 +125,13 @@ def parse_args(argv=None):
             "  senaite-mcp                 # stdio (a host launches this)\n"
             "  senaite-mcp --transport streamable-http --port 7980\n"))
     parser.add_argument(
+        "--url", help="SENAITE site URL (overrides $SENAITE_URL), "
+        "e.g. http://localhost:8080/senaite2")
+    parser.add_argument(
+        "--username", help="login user (overrides $SENAITE_USERNAME)")
+    parser.add_argument(
+        "--password", help="login password (overrides $SENAITE_PASSWORD)")
+    parser.add_argument(
         "--transport", choices=["stdio", "streamable-http", "sse"],
         default=os.environ.get("SENAITE_MCP_TRANSPORT", "stdio"),
         help="transport to run (default: stdio, or $SENAITE_MCP_TRANSPORT)")
@@ -142,7 +150,16 @@ def parse_args(argv=None):
 
 def main(argv=None):
     """Console-script entry point: run the MCP server."""
+    # httpx logs one INFO line per request; keep the server's stderr tidy.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     args = parse_args(argv)
+    # CLI connection flags override the environment for the lazy client.
+    for flag, env in (("url", "SENAITE_URL"),
+                      ("username", "SENAITE_USERNAME"),
+                      ("password", "SENAITE_PASSWORD")):
+        value = getattr(args, flag)
+        if value:
+            os.environ[env] = value
     target = os.environ.get("SENAITE_URL", "<SENAITE_URL unset>")
     if args.transport != "stdio":
         mcp.settings.host = args.host
