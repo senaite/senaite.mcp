@@ -8,8 +8,6 @@ chains, composing a lab) belongs behind the API, not here.
 
 import httpx
 
-from .config import Settings
-
 API_MOUNT = "@@API/senaite/v1"
 
 

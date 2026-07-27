@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+#
+# Run the SENAITE MCP server (stdio transport).
+#
+# Reads connection settings from .env if present. Register this script
+# with your MCP host (e.g. `claude mcp add senaite -- .../bin/serve`).
+#
+set -eu
+
+HERE="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$HERE"
+
+# Load .env (SENAITE_URL, credentials) if present.
+if [ -f .env ]; then
+    set -a
+    . ./.env
+    set +a
+fi
+
+PYENV_ROOT="${PYENV_ROOT:-$HOME/.pyenv}"
+exec "$PYENV_ROOT/versions/senaite.mcp/bin/senaite-mcp" "$@"

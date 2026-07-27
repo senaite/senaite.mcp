@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+#
+# Run the test suite. Extra args pass through to pytest.
+#
+set -eu
+
+HERE="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$HERE"
+
+PYENV_ROOT="${PYENV_ROOT:-$HOME/.pyenv}"
+exec "$PYENV_ROOT/versions/senaite.mcp/bin/pytest" "$@"
