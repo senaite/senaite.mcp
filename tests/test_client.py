@@ -84,3 +84,14 @@ def test_do_transition(client):
     client.do_transition("a" * 32, "receive")
     assert client.calls[-1] == (
         "PATCH", "a" * 32, None, {"transition": "receive"})
+
+
+def test_compose(client):
+    spec = {"version": 1, "setup": [], "content": []}
+    client.compose(spec)
+    assert client.calls[-1] == ("POST", "compose", None, spec)
+
+
+def test_compose_reference(client):
+    client.compose_reference()
+    assert client.calls[-1] == ("GET", "compose/reference", None, None)

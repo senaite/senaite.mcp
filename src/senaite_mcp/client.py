@@ -59,14 +59,26 @@ class SenaiteClient:
             data = resp.json()
         except ValueError:
             raise SenaiteError(
-                "Non-JSON response ({})".format(resp.status_code),
-                status=resp.status_code)
+                self._not_json(resp), status=resp.status_code)
         if resp.status_code >= 400 or data.get("success") is False:
             raise SenaiteError(
                 data.get("message", "Request failed"),
                 status=resp.status_code,
                 error_type=data.get("type"))
         return data
+
+    def _not_json(self, resp):
+        """Explain a response that is not JSON at all.
+
+        The common cause is a route the site does not have, which
+        answers with an error page. Saying "Non-JSON response (404)"
+        leaves the caller to work out that the add-on is missing.
+        """
+        if resp.status_code == 404 and "/compose" in resp.url.path:
+            return ("No composer on this site: the /compose route is "
+                    "not there. Install senaite.composer on {}"
+                    .format(self.base_url))
+        return "Non-JSON response ({})".format(resp.status_code)
 
     # -- high level -------------------------------------------------------
 
@@ -113,3 +125,25 @@ class SenaiteClient:
         """Fire a workflow `transition` on the object `uid`."""
         return self.request(
             "PATCH", uid, payload={"transition": transition})
+
+    def compose_reference(self):
+        """Return what a spec may say, as the composer reports it.
+
+        Read from the engine's own tables on the server, so it cannot
+        drift from what a compose will actually accept.
+        """
+        return self.request("GET", "compose/reference")
+
+    def compose(self, spec):
+        """Build a whole laboratory from a declarative `spec`.
+
+        The route is provided by `senaite.composer`, which resolves the
+        references between the items and puts each one in the container
+        its type belongs in. A site without that add-on answers 404,
+        which is the honest answer rather than a partial build.
+
+        :param spec: the composer spec, already parsed
+        :returns: the composer report, with what was created, updated
+            and skipped
+        """
+        return self.request("POST", "compose", payload=spec)

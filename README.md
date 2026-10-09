@@ -6,6 +6,29 @@ one `senaite.jsonapi` v1 route. All orchestration (workflow chains,
 composing a whole lab via `senaite.composer`) lives behind the API in
 SENAITE, not here.
 
+## Quickstart
+
+```bash
+pip install -e .
+export SENAITE_URL=http://localhost:8080/senaite
+senaite-mcp --transport streamable-http --port 7980
+```
+
+Point an MCP host at it (see *Register with an MCP host* below) and
+ask it something. Two tools matter more than the rest:
+
+- `senaite_search` to find anything, by any catalog index.
+- `senaite_compose` to build a whole laboratory from one declarative
+  spec, rather than creating sixty objects one at a time and threading
+  the UIDs between them by hand.
+
+Before writing a spec, call `senaite_compose_reference`. It reports
+which types the composer can place and where it puts each one, what a
+re-run recognises an existing object by, and the keys an item
+understands, read from the server's own tables. A spec written from a
+guess half works, and the half that does not is reported one item at a
+time.
+
 ## Architecture
 
 ```
@@ -133,6 +156,38 @@ SSH tunnel, or a VPN, and only then set `SENAITE_MCP_HOST=0.0.0.0`.
 | `senaite_update`        | `PATCH /<uid>`                           |
 | `senaite_delete`        | `DELETE /<uid>`                          |
 | `senaite_do_transition` | `PATCH /<uid>` with a `transition` field |
+| `senaite_compose_reference` | `GET /compose/reference`             |
+| `senaite_compose`       | `POST /compose`                          |
+
+The last two need [senaite.composer](https://github.com/ridingbytes/senaite.composer)
+on the target site. Without it the call says so rather than failing
+obscurely.
+
+### Building a laboratory
+
+`senaite_compose` takes a mapping with two ordered sections, `setup`
+for the configuration and `content` for clients, contacts and samples.
+Each item names a `portal_type` and its `fields`; an `id` lets a later
+item point at it with `{"ref": "<id>"}`.
+
+```json
+{"version": 1,
+ "setup": [
+   {"id": "cat", "portal_type": "AnalysisCategory",
+    "fields": {"title": "Chemistry", "department": {"ref": "dept"}}}],
+ "content": [
+   {"id": "acme", "portal_type": "Client",
+    "fields": {"title": "ACME", "ClientID": "ACME"}}]}
+```
+
+Runs are idempotent: sending the same spec twice updates what is there
+instead of duplicating it, so an agent can correct one item and send
+the whole thing again. The answer reports what was created, updated,
+skipped and, per item, what failed.
+
+Two rules decide most of the errors. The `setup` section is composed
+before `content`, so anything the setup points at has to be in it. And
+an item has to come after whatever it references.
 
 The REST verbs (`PATCH` / `DELETE`) require senaite.jsonapi with the
 REST-verb support and a JSON API framework that lets those verbs through
