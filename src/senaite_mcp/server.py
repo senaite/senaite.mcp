@@ -100,6 +100,30 @@ def senaite_do_transition(uid: str, transition: str) -> dict:
     return client().do_transition(uid, transition)
 
 
+@mcp.tool()
+def senaite_compose(spec: dict) -> dict:
+    """Build a laboratory from a declarative spec, in one call.
+
+    This is the tool to reach for when the task is "set up a lab", not
+    "change one object". The spec names what to create, in two ordered
+    sections, `setup` for the configuration and `content` for clients,
+    contacts and samples. An item gives a `portal_type` and its
+    `fields`; an `id` lets a later item point at it with
+    `{"ref": "<id>"}`, and the server resolves those into UIDs and
+    puts every object in the container its type belongs in.
+
+    Runs are idempotent: composing the same spec twice updates what is
+    there instead of duplicating it, so a spec can be corrected and
+    sent again.
+
+    Needs `senaite.composer` installed on the target site. Without it
+    the call fails rather than half-building the lab.
+
+    :param spec: the composer spec as a mapping
+    """
+    return client().compose(spec)
+
+
 def parse_args(argv=None):
     """Parse command-line arguments (flags default to env vars).
 

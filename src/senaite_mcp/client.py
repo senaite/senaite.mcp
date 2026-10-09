@@ -113,3 +113,17 @@ class SenaiteClient:
         """Fire a workflow `transition` on the object `uid`."""
         return self.request(
             "PATCH", uid, payload={"transition": transition})
+
+    def compose(self, spec):
+        """Build a whole laboratory from a declarative `spec`.
+
+        The route is provided by `senaite.composer`, which resolves the
+        references between the items and puts each one in the container
+        its type belongs in. A site without that add-on answers 404,
+        which is the honest answer rather than a partial build.
+
+        :param spec: the composer spec, already parsed
+        :returns: the composer report, with what was created, updated
+            and skipped
+        """
+        return self.request("POST", "compose", payload=spec)
