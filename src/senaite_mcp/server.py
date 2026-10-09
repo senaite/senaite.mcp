@@ -101,6 +101,22 @@ def senaite_do_transition(uid: str, transition: str) -> dict:
 
 
 @mcp.tool()
+def senaite_compose_reference() -> dict:
+    """Return what a composer spec may say on this site.
+
+    Read this before writing a spec. It reports the types the composer
+    can place and where it puts each one, what a re-run recognises an
+    existing object by, the keys an item and a workflow step may carry,
+    and the field values the composer converts on the way in.
+
+    It is read from the server's own tables, so it describes what a
+    compose will actually accept rather than what a document says it
+    should.
+    """
+    return client().compose_reference()
+
+
+@mcp.tool()
 def senaite_compose(spec: dict) -> dict:
     """Build a laboratory from a declarative spec, in one call.
 
