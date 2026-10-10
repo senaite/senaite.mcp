@@ -193,6 +193,36 @@ The REST verbs (`PATCH` / `DELETE`) require senaite.jsonapi with the
 REST-verb support and a JSON API framework that lets those verbs through
 (plone.jsonapi.core >= 0.8.0).
 
+## Troubleshooting
+
+**`404` on `/compose` or `/compose/reference`.** The route belongs to
+senaite.composer, which is installed per site rather than per
+instance. Install it from `Site Setup` -> `Add-ons` on that site. The
+client says which add-on is missing rather than passing the raw 404
+on.
+
+**`401` on every call.** The credentials are wrong, or the instance
+answers on a different site id than the one in `SENAITE_URL`. The URL
+has to point at the site, not at the Zope root:
+`http://localhost:8080/senaite`, not `http://localhost:8080`.
+
+**`405` on an update or a delete.** The target runs a JSON API
+framework that does not let `PATCH` and `DELETE` through. That needs
+plone.jsonapi.core 0.8.0 or newer.
+
+**`500` where `400` was expected.** An older senaite.jsonapi renders a
+refused field value as a server error. The message is still the field
+and the reason; only the status is misleading.
+
+**A field that is silently not set.** An older senaite.jsonapi logs an
+unknown field name and answers that all was well. Check the object
+back with `senaite_get`: what came back is what was stored.
+
+**An agent guessing at spec keys.** It does not have to. Ask
+`senaite_compose_reference` first: the answer is generated from the
+composer's own constants, so it lists the sections, the item keys, the
+container locations and the natural keys as the running code has them.
+
 ## Tests
 
 ```bash
