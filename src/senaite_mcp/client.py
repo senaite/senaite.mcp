@@ -74,24 +74,27 @@ class SenaiteClient:
 
     # -- low level --------------------------------------------------------
 
-    async def request(self, method, path, params=None, payload=None):
+    async def request(self, method, path, params=None, payload=None,
+                      timeout=None):
         """Perform a request against the JSON API and unwrap the result.
 
         :param method: HTTP verb (GET, POST, PATCH, DELETE)
         :param path: route below the v1 mount, e.g. `search` or a uid
         :param params: optional query-string mapping
         :param payload: optional JSON body mapping
+        :param timeout: seconds to wait, defaults to the settings
         :returns: the parsed response envelope
         :raises SenaiteError: on a non-2xx status or `success: false`
         """
         url = "{}/{}".format(self.api_url, path.lstrip("/"))
+        timeout = timeout or self.settings.timeout
         try:
             resp = await self._client.request(
-                method, url, params=params, json=payload)
+                method, url, params=params, json=payload, timeout=timeout)
         except httpx.TimeoutException:
             raise SenaiteError(
                 "No answer from {} within {} seconds".format(
-                    self.settings.base_url, self.settings.timeout))
+                    self.settings.base_url, timeout))
         except httpx.TransportError as exc:
             raise SenaiteError("Cannot reach {}: {}".format(
                 self.settings.base_url, exc))
@@ -142,6 +145,16 @@ class SenaiteClient:
             status, resp.reason_phrase)
 
     # -- high level -------------------------------------------------------
+
+    async def current_user(self):
+        """Return the user the site sees behind this client's login.
+
+        A site answers a wrong password as if the caller were anonymous
+        rather than refusing it, so this is the one way to tell.
+        """
+        found = await self.request("GET", "users/current")
+        items = found.get("items") or [{}]
+        return items[0]
 
     async def version(self):
         """Return the JSON API version envelope."""
@@ -208,4 +221,6 @@ class SenaiteClient:
         :returns: the composer report, with what was created, updated
             and skipped
         """
-        return await self.request("POST", "compose", payload=spec)
+        return await self.request(
+            "POST", "compose", payload=spec,
+            timeout=self.settings.compose_timeout)

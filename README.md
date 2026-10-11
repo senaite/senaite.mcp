@@ -60,8 +60,10 @@ Set the target instance via environment variables (see `.env.example`).
 Point it at your local SENAITE instance:
 
 - `SENAITE_URL` (required) — site URL, e.g. `http://localhost:8080/senaite`
-- `SENAITE_USERNAME` / `SENAITE_PASSWORD` — defaults `admin` / `admin`
-- `SENAITE_TIMEOUT` — request timeout in seconds (default `30`)
+- `SENAITE_USERNAME` / `SENAITE_PASSWORD` (required): the login. There
+  is no password flag, because a flag shows up in the process list
+- `SENAITE_TIMEOUT`: seconds per request (default `30`)
+- `SENAITE_COMPOSE_TIMEOUT`: seconds per compose (default `300`)
 - `SENAITE_VERIFY_SSL` — verify TLS certificates (default `true`)
 
 ## Commands
