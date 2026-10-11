@@ -1,191 +1,180 @@
 # -*- coding: utf-8 -*-
-"""FastMCP server exposing SENAITE JSON API operations as tools."""
+"""Command line entry point: check the configuration, then serve."""
 
 import argparse
+import asyncio
 import logging
 import os
 import sys
-from typing import Any, Optional
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from senaite_mcp import __version__
-from .client import SenaiteClient
-from .config import Settings
+from senaite_mcp.client import SenaiteClient
+from senaite_mcp.client import SenaiteError
+from senaite_mcp.config import ConfigError
+from senaite_mcp.config import Settings
+from senaite_mcp.tools import Tools
 
-mcp = FastMCP("senaite")
+TRANSPORTS = ("stdio", "streamable-http", "sse")
 
-_client = None
+# Content types `--check` counts to show the login sees the content
+CHECK_TYPES = ("Client", "Contact", "AnalysisService", "AnalysisRequest")
 
+EPILOG = """\
+connection (environment variables):
+  SENAITE_URL              site URL, e.g. http://localhost:8080/senaite
+  SENAITE_USERNAME         login user (required)
+  SENAITE_PASSWORD         login password (required, no flag on purpose:
+                           a flag shows up in the process list)
+  SENAITE_TIMEOUT          seconds per request (default: 30)
+  SENAITE_COMPOSE_TIMEOUT  seconds per compose (default: 300)
+  SENAITE_VERIFY_SSL       verify TLS certificates (default: true)
 
-def client():
-    """Return the process-wide client, built lazily from the env."""
-    global _client
-    if _client is None:
-        _client = SenaiteClient(Settings.from_env())
-    return _client
+server (environment variables, the flags override them):
+  SENAITE_MCP_TRANSPORT      stdio, streamable-http or sse
+  SENAITE_MCP_HOST           bind host (default: 127.0.0.1)
+  SENAITE_MCP_PORT           bind port (default: 7980)
+  SENAITE_MCP_ALLOWED_HOSTS  comma-separated Host headers to accept
 
-
-@mcp.tool()
-async def senaite_version() -> dict:
-    """Return the SENAITE JSON API version and endpoint info."""
-    return await client().version()
-
-
-@mcp.tool()
-async def senaite_search(
-    portal_type: str = "",
-    query: Optional[dict] = None,
-    limit: int = 25,
-) -> dict:
-    """Search SENAITE content.
-
-    :param portal_type: restrict to a content type, e.g. `Client`
-    :param query: extra JSON API query params (catalog indexes, sorting)
-    :param limit: maximum number of items to return
-    """
-    params: dict[str, Any] = dict(query or {})
-    if portal_type:
-        params["portal_type"] = portal_type
-    params.setdefault("limit", limit)
-    return await client().search(params)
+examples:
+  senaite-mcp --check          # test the login, then exit
+  senaite-mcp                  # stdio, an MCP host launches this
+  senaite-mcp --transport streamable-http --port 7980
+"""
 
 
-@mcp.tool()
-async def senaite_get(uid: str = "", resource: str = "") -> dict:
-    """Fetch a record by uid, or list a resource / portal_type.
-
-    :param uid: 32-char object uid
-    :param resource: plural resource or portal_type name
-    """
-    return await client().get(uid=uid or None, resource=resource or None)
+def split_hosts(value):
+    """Split a comma-separated host list, dropping empty entries."""
+    return [host.strip() for host in (value or "").split(",")
+            if host.strip()]
 
 
-@mcp.tool()
-async def senaite_create(
-    portal_type: str,
-    parent_path: str,
-    fields: Optional[dict] = None,
-) -> dict:
-    """Create a content object.
-
-    :param portal_type: content type to create, e.g. `Client`
-    :param parent_path: physical path of the container, e.g.
-        `/senaite/clients`
-    :param fields: field values for the new object
-    """
-    return await client().create(portal_type, parent_path, fields or {})
-
-
-@mcp.tool()
-async def senaite_update(uid: str, fields: dict) -> dict:
-    """Update the object addressed by `uid` with `fields`."""
-    return await client().update(uid, fields)
-
-
-@mcp.tool()
-async def senaite_delete(uid: str) -> dict:
-    """Delete the object addressed by `uid`."""
-    return await client().delete(uid)
-
-
-@mcp.tool()
-async def senaite_do_transition(uid: str, transition: str) -> dict:
-    """Fire a workflow transition on an object.
-
-    :param uid: 32-char object uid
-    :param transition: workflow transition id, e.g. `receive`, `submit`,
-        `verify`, `publish`
-    """
-    return await client().do_transition(uid, transition)
-
-
-@mcp.tool()
-async def senaite_compose_reference() -> dict:
-    """Return what a composer spec may say on this site.
-
-    Read this before writing a spec. It reports the types the composer
-    can place and where it puts each one, what a re-run recognises an
-    existing object by, the keys an item and a workflow step may carry,
-    and the field values the composer converts on the way in.
-
-    It is read from the server's own tables, so it describes what a
-    compose will actually accept rather than what a document says it
-    should.
-    """
-    return await client().compose_reference()
-
-
-@mcp.tool()
-async def senaite_compose(spec: dict) -> dict:
-    """Build a laboratory from a declarative spec, in one call.
-
-    This is the tool to reach for when the task is "set up a lab", not
-    "change one object". The spec names what to create, in two ordered
-    sections, `setup` for the configuration and `content` for clients,
-    contacts and samples. An item gives a `portal_type` and its
-    `fields`; an `id` lets a later item point at it with
-    `{"ref": "<id>"}`, and the server resolves those into UIDs and
-    puts every object in the container its type belongs in.
-
-    Runs are idempotent: composing the same spec twice updates what is
-    there instead of duplicating it, so a spec can be corrected and
-    sent again.
-
-    Needs `senaite.composer` installed on the target site. Without it
-    the call fails rather than half-building the lab.
-
-    :param spec: the composer spec as a mapping
-    """
-    return await client().compose(spec)
-
-
-def parse_args(argv=None):
-    """Parse command-line arguments (flags default to env vars).
+def parse_args(argv=None, environ=None):
+    """Parse command-line arguments, which default to the environment.
 
     The host defaults to localhost on purpose: a reachable MCP endpoint
     grants callers the same power over SENAITE as this server's
     credentials, so only bind a public interface behind authentication
     (reverse proxy with TLS, SSH tunnel or VPN).
     """
+    env = os.environ if environ is None else environ
     parser = argparse.ArgumentParser(
         prog="senaite-mcp",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="MCP server exposing the SENAITE JSON API to agents.",
-        epilog=(
-            "connection (environment variables):\n"
-            "  SENAITE_URL          site URL, e.g. "
-            "http://localhost:8080/senaite (required)\n"
-            "  SENAITE_USERNAME     default: admin\n"
-            "  SENAITE_PASSWORD     default: admin\n"
-            "  SENAITE_TIMEOUT      request timeout, seconds "
-            "(default: 30)\n"
-            "  SENAITE_VERIFY_SSL   verify TLS certs (default: true)\n\n"
-            "examples:\n"
-            "  senaite-mcp                 # stdio (a host launches this)\n"
-            "  senaite-mcp --transport streamable-http --port 7980\n"))
+        epilog=EPILOG)
     parser.add_argument(
-        "--url", help="SENAITE site URL (overrides $SENAITE_URL), "
-        "e.g. http://localhost:8080/senaite2")
+        "--url", help="SENAITE site URL (overrides $SENAITE_URL)")
     parser.add_argument(
         "--username", help="login user (overrides $SENAITE_USERNAME)")
     parser.add_argument(
-        "--password", help="login password (overrides $SENAITE_PASSWORD)")
+        "--check", action="store_true",
+        help="test the connection and the login, then exit")
     parser.add_argument(
-        "--transport", choices=["stdio", "streamable-http", "sse"],
-        default=os.environ.get("SENAITE_MCP_TRANSPORT", "stdio"),
-        help="transport to run (default: stdio, or $SENAITE_MCP_TRANSPORT)")
+        "--transport", choices=TRANSPORTS,
+        default=env.get("SENAITE_MCP_TRANSPORT", "stdio"),
+        help="transport to run (default: stdio)")
     parser.add_argument(
-        "--host", default=os.environ.get("SENAITE_MCP_HOST", "127.0.0.1"),
+        "--host", default=env.get("SENAITE_MCP_HOST", "127.0.0.1"),
         help="bind host for network transports (default: 127.0.0.1)")
     parser.add_argument(
-        "--port", type=int,
-        default=int(os.environ.get("SENAITE_MCP_PORT", "7980")),
+        "--port", type=int, default=int(env.get("SENAITE_MCP_PORT", "7980")),
         help="bind port for network transports (default: 7980)")
+    parser.add_argument(
+        "--allowed-host", action="append", dest="allowed_hosts",
+        default=split_hosts(env.get("SENAITE_MCP_ALLOWED_HOSTS")),
+        help="a Host header to accept, e.g. mcp.example.com:443; "
+             "repeat for more")
     parser.add_argument(
         "--version", action="version",
         version="senaite-mcp {}".format(__version__))
     return parser.parse_args(argv)
+
+
+def load_settings(args, environ=None):
+    """Return the connection settings, the flags winning over the env.
+
+    :raises ConfigError: when the result is not usable
+    """
+    env = dict(os.environ if environ is None else environ)
+    if args.url:
+        env["SENAITE_URL"] = args.url
+    if args.username:
+        env["SENAITE_USERNAME"] = args.username
+    return Settings.from_env(env)
+
+
+def transport_security(allowed_hosts):
+    """Return the Host header checks for a network transport.
+
+    The SDK protects a server bound to localhost against DNS rebinding
+    on its own, and accepts only localhost Host headers there. Bound
+    anywhere else it checks nothing, unless the hosts are listed.
+
+    :param allowed_hosts: Host header values to accept, may be empty
+    :returns: settings for the SDK, or None for its default
+    """
+    if not allowed_hosts:
+        return None
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=list(allowed_hosts))
+
+
+def build_server(client, host="127.0.0.1", port=7980, allowed_hosts=()):
+    """Return a FastMCP server with every tool bound to `client`.
+
+    Built here rather than at import time, because the SDK fixes its
+    Host header checks from the bind host when the server is created.
+    """
+    server = FastMCP(
+        "senaite", host=host, port=port,
+        transport_security=transport_security(allowed_hosts))
+    for tool in Tools(client).all():
+        server.add_tool(tool)
+    return server
+
+
+async def check_login(settings):
+    """Return the name the site knows this login by, or raise.
+
+    :raises SenaiteError: when the site cannot be reached, or answers
+        the login as an anonymous caller
+    """
+    client = SenaiteClient(settings)
+    try:
+        user = await client.current_user()
+    finally:
+        await client.close()
+    if not user.get("authenticated"):
+        raise SenaiteError(
+            "{} does not accept the login {!r}: check SENAITE_USERNAME "
+            "and SENAITE_PASSWORD".format(
+                settings.base_url, settings.username), status=401)
+    return user.get("username")
+
+
+async def report(settings):
+    """Print the API version and a few content counts, for `--check`."""
+    client = SenaiteClient(settings)
+    try:
+        version = await client.version()
+        print("api_url: {}".format(client.api_url))
+        print("version: {}".format(version.get("version")))
+        for portal_type in CHECK_TYPES:
+            found = await client.search(
+                {"portal_type": portal_type, "limit": 1})
+            print("  {:<16} {}".format(portal_type, found.get("count")))
+    finally:
+        await client.close()
+
+
+def fail(message):
+    """Print `message` to stderr and return the exit status."""
+    print("senaite-mcp: {}".format(message), file=sys.stderr)
+    return 1
 
 
 def main(argv=None):
@@ -193,25 +182,38 @@ def main(argv=None):
     # httpx logs one INFO line per request; keep the server's stderr tidy.
     logging.getLogger("httpx").setLevel(logging.WARNING)
     args = parse_args(argv)
-    # CLI connection flags override the environment for the lazy client.
-    for flag, env in (("url", "SENAITE_URL"),
-                      ("username", "SENAITE_USERNAME"),
-                      ("password", "SENAITE_PASSWORD")):
-        value = getattr(args, flag)
-        if value:
-            os.environ[env] = value
-    target = os.environ.get("SENAITE_URL", "<SENAITE_URL unset>")
+    try:
+        settings = load_settings(args)
+    except ConfigError as exc:
+        return fail(exc)
+
+    # A wrong login is final, so stop. An unreachable site may only
+    # not be up yet, so serve anyway: each call reports it until it is.
+    try:
+        username = asyncio.run(check_login(settings))
+    except SenaiteError as exc:
+        if exc.status is not None or args.check:
+            return fail(exc)
+        username = None
+        print("senaite-mcp: warning: {}".format(exc), file=sys.stderr)
+
+    if args.check:
+        print("login:   {}".format(username))
+        asyncio.run(report(settings))
+        return 0
+
+    server = build_server(
+        SenaiteClient(settings), args.host, args.port, args.allowed_hosts)
+    listen = "stdio"
     if args.transport != "stdio":
-        mcp.settings.host = args.host
-        mcp.settings.port = args.port
         listen = "{}:{}".format(args.host, args.port)
-    else:
-        listen = "stdio"
     # Log to stderr: in stdio mode stdout carries the MCP protocol.
-    print("senaite-mcp starting: transport={} listen={} target={}".format(
-        args.transport, listen, target), file=sys.stderr)
-    mcp.run(transport=args.transport)
+    print("senaite-mcp {} starting: transport={} listen={} target={} "
+          "user={}".format(__version__, args.transport, listen,
+                           settings.base_url, username), file=sys.stderr)
+    server.run(transport=args.transport)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
