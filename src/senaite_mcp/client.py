@@ -11,9 +11,17 @@ transport for as long as SENAITE takes to answer, and composing a
 whole laboratory takes a while.
 """
 
+import re
+
 import httpx
 
 API_MOUNT = "@@API/senaite/v1"
+
+# A content UID, or "0" for the portal itself
+UID_RE = re.compile(r"^(0|[0-9a-f]{32})$")
+
+# Statuses a site answers with when it sends the caller to a login form
+REDIRECTS = (301, 302, 303, 307, 308)
 
 
 class SenaiteError(RuntimeError):
@@ -23,6 +31,23 @@ class SenaiteError(RuntimeError):
         super().__init__(message)
         self.status = status
         self.error_type = error_type
+
+
+def require_uid(uid):
+    """Return `uid` if it addresses one object, else raise.
+
+    An empty uid would send a PATCH or DELETE to the API root, and a
+    path fragment would be joined into the URL. Neither is a uid.
+
+    :param uid: the value an agent passed as uid
+    :returns: the uid, unchanged
+    :raises ValueError: when `uid` is not 32 hex characters or "0"
+    """
+    if not isinstance(uid, str) or not UID_RE.match(uid):
+        raise ValueError(
+            "Not a uid: {!r}. A uid is 32 hex characters, as the "
+            "`uid` key of a search result has it".format(uid))
+    return uid
 
 
 class SenaiteClient:
@@ -60,19 +85,38 @@ class SenaiteClient:
         :raises SenaiteError: on a non-2xx status or `success: false`
         """
         url = "{}/{}".format(self.api_url, path.lstrip("/"))
-        resp = await self._client.request(
-            method, url, params=params, json=payload)
+        try:
+            resp = await self._client.request(
+                method, url, params=params, json=payload)
+        except httpx.TimeoutException:
+            raise SenaiteError(
+                "No answer from {} within {} seconds".format(
+                    self.settings.base_url, self.settings.timeout))
+        except httpx.TransportError as exc:
+            raise SenaiteError("Cannot reach {}: {}".format(
+                self.settings.base_url, exc))
         return self._unwrap(resp)
 
     def _unwrap(self, resp):
+        """Return the JSON envelope of `resp`, or raise what went wrong.
+
+        The message carries the status, because an MCP host passes the
+        message on to the agent and nothing else.
+        """
         try:
             data = resp.json()
         except ValueError:
             raise SenaiteError(
                 self._not_json(resp), status=resp.status_code)
+        if not isinstance(data, dict):
+            raise SenaiteError(
+                "Unexpected answer ({}): not a JSON object".format(
+                    resp.status_code), status=resp.status_code)
         if resp.status_code >= 400 or data.get("success") is False:
             raise SenaiteError(
-                data.get("message", "Request failed"),
+                "{} {}: {}".format(
+                    resp.status_code, resp.reason_phrase,
+                    data.get("message", "Request failed")),
                 status=resp.status_code,
                 error_type=data.get("type"))
         return data
@@ -80,15 +124,22 @@ class SenaiteClient:
     def _not_json(self, resp):
         """Explain a response that is not JSON at all.
 
-        The common cause is a route the site does not have, which
-        answers with an error page. Saying "Non-JSON response (404)"
-        leaves the caller to work out that the add-on is missing.
+        The common causes are a route the site does not have, which
+        answers with an error page, and a login the site refused, which
+        answers with a redirect to its login form. Saying "Non-JSON
+        response (404)" leaves the caller to work out which.
         """
-        if resp.status_code == 404 and "/compose" in resp.url.path:
+        status = resp.status_code
+        if status == 404 and "/compose" in resp.url.path:
             return ("No composer on this site: the /compose route is "
                     "not there. Install senaite.composer on {}"
-                    .format(self.base_url))
-        return "Non-JSON response ({})".format(resp.status_code)
+                    .format(self.settings.base_url))
+        if status in REDIRECTS:
+            return ("Redirected ({}) instead of answered: the username "
+                    "or password is wrong, or {} is not a SENAITE site"
+                    .format(status, self.settings.base_url))
+        return "Non-JSON response ({} {})".format(
+            status, resp.reason_phrase)
 
     # -- high level -------------------------------------------------------
 
@@ -107,9 +158,9 @@ class SenaiteClient:
         :param resource: plural resource / portal_type name
         """
         if uid and resource:
-            path = "{}/{}".format(resource, uid)
+            path = "{}/{}".format(resource, require_uid(uid))
         elif uid:
-            path = uid
+            path = require_uid(uid)
         elif resource:
             path = resource
         else:
@@ -125,16 +176,17 @@ class SenaiteClient:
 
     async def update(self, uid, fields):
         """Update the object addressed by `uid` with `fields`."""
-        return await self.request("PATCH", uid, payload=dict(fields or {}))
+        return await self.request(
+            "PATCH", require_uid(uid), payload=dict(fields or {}))
 
     async def delete(self, uid):
         """Delete the object addressed by `uid`."""
-        return await self.request("DELETE", uid)
+        return await self.request("DELETE", require_uid(uid))
 
     async def do_transition(self, uid, transition):
         """Fire a workflow `transition` on the object `uid`."""
         return await self.request(
-            "PATCH", uid, payload={"transition": transition})
+            "PATCH", require_uid(uid), payload={"transition": transition})
 
     async def compose_reference(self):
         """Return what a spec may say, as the composer reports it.
