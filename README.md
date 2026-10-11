@@ -173,9 +173,7 @@ own tables.
 and is not published with this server. It sets up a complete
 laboratory from one spec: configuration, users with their roles,
 clients, and samples in every state of the workflow, each step done by
-the person the spec names. RIDING BYTES uses it for demo and training
-sites and provides it on request:
-<https://www.ridingbytes.com/contact/>.
+the person the spec names.
 
 On a site without it, the two compose tools answer that it is
 missing; every other tool works the same.
