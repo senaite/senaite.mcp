@@ -1,0 +1,27 @@
+# Sourced by the scripts in bin/: change into the checkout, load .env
+# and define find_tool, which locates a console script.
+
+cd "$HERE"
+
+if [ -f .env ]; then
+    set -a
+    . ./.env
+    set +a
+fi
+
+PYENV_ROOT="${PYENV_ROOT:-$HOME/.pyenv}"
+
+find_tool() {
+    for dir in "$HERE/.venv/bin" "$PYENV_ROOT/versions/senaite.mcp/bin"; do
+        if [ -x "$dir/$1" ]; then
+            echo "$dir/$1"
+            return
+        fi
+    done
+    if command -v "$1" >/dev/null; then
+        command -v "$1"
+        return
+    fi
+    echo "$1 not found: run 'pip install -e \".[test]\"' first" >&2
+    exit 1
+}

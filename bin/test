@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #
-# Run the test suite. Extra args pass through to pytest.
+# Run flake8 and the test suite. Extra args pass through to pytest.
 #
 set -eu
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$HERE"
+. "$HERE/bin/_env"
 
-PYENV_ROOT="${PYENV_ROOT:-$HOME/.pyenv}"
-exec "$PYENV_ROOT/versions/senaite.mcp/bin/pytest" "$@"
+"$(find_tool flake8)" src tests
+exec "$(find_tool pytest)" "$@"
