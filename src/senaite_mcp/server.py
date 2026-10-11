@@ -132,8 +132,8 @@ def build_server(client, host="127.0.0.1", port=7980, allowed_hosts=()):
     server = FastMCP(
         "senaite", host=host, port=port,
         transport_security=transport_security(allowed_hosts))
-    for tool in Tools(client).all():
-        server.add_tool(tool)
+    for tool, annotations in Tools(client).all():
+        server.add_tool(tool, annotations=annotations)
     return server
 
 

@@ -164,11 +164,12 @@ class SenaiteClient:
         """Search content; `query` is a JSON API query mapping."""
         return await self.request("GET", "search", params=query or {})
 
-    async def get(self, uid=None, resource=None):
+    async def get(self, uid=None, resource=None, params=None):
         """Fetch a record by uid, a resource listing, or one of a kind.
 
         :param uid: 32-char object uid
         :param resource: plural resource / portal_type name
+        :param params: optional query-string mapping, e.g. the batch
         """
         if uid and resource:
             path = "{}/{}".format(resource, require_uid(uid))
@@ -178,7 +179,7 @@ class SenaiteClient:
             path = resource
         else:
             raise ValueError("Provide 'uid' and/or 'resource'")
-        return await self.request("GET", path)
+        return await self.request("GET", path, params=params)
 
     async def create(self, portal_type, parent_path, fields=None):
         """Create an object of `portal_type` inside `parent_path`."""
@@ -193,7 +194,7 @@ class SenaiteClient:
             "PATCH", require_uid(uid), payload=dict(fields or {}))
 
     async def delete(self, uid):
-        """Delete the object addressed by `uid`."""
+        """Deactivate the object `uid`; SENAITE never hard-deletes."""
         return await self.request("DELETE", require_uid(uid))
 
     async def do_transition(self, uid, transition):

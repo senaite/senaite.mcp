@@ -74,3 +74,11 @@ async def test_check_login_refused(monkeypatch):
         await check(current_user(False), monkeypatch)
     assert info.value.status == 401
     assert "does not accept the login 'agent'" in str(info.value)
+
+
+async def test_annotations():
+    server = build_server(make_client(current_user(True)))
+    tools = {tool.name: tool for tool in await server.list_tools()}
+    assert tools["senaite_search"].annotations.readOnlyHint is True
+    assert tools["senaite_create"].annotations.readOnlyHint is False
+    assert tools["senaite_compose"].annotations.idempotentHint is True
