@@ -21,7 +21,8 @@ agent ──MCP──> senaite-mcp (Python 3) ──HTTP──> SENAITE JSON API
 - a SENAITE 2.x site with `senaite.jsonapi`
 - a SENAITE user for the agent. Give it the roles the agent's work
   needs and no more: a lab manager login can verify and publish
-- for `senaite_compose`: the `senaite.composer` add-on on the site,
+- for `senaite_compose`: the `senaite.composer` add-on on the site
+  (see [Getting senaite.composer](#getting-senaitecomposer)),
   and a login holding `Manager`, since a spec creates users and grants
   roles
 
@@ -166,8 +167,17 @@ returns the sections, the item keys, the container of each type and
 what a re-run recognises an object by, generated from the composer's
 own tables.
 
-`senaite.composer` is a separate add-on and is not published with this
-server. On a site without it, the two compose tools answer that it is
+### Getting senaite.composer
+
+`senaite.composer` is an add-on by [RIDING BYTES](https://www.ridingbytes.com)
+and is not published with this server. It sets up a complete
+laboratory from one spec: configuration, users with their roles,
+clients, and samples in every state of the workflow, each step done by
+the person the spec names. RIDING BYTES uses it for demo and training
+sites and provides it on request:
+<https://www.ridingbytes.com/contact/>.
+
+On a site without it, the two compose tools answer that it is
 missing; every other tool works the same.
 
 ## Running over the network
