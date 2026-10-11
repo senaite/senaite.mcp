@@ -4,6 +4,11 @@
 The client is intentionally dumb: it maps one method to one JSON API
 route and returns the parsed envelope. All orchestration (workflow
 chains, composing a lab) belongs behind the API, not here.
+
+It is asynchronous because the MCP server runs every tool on one event
+loop. A blocking call would hold up every other session on an HTTP
+transport for as long as SENAITE takes to answer, and composing a
+whole laboratory takes a while.
 """
 
 import httpx
@@ -23,23 +28,28 @@ class SenaiteError(RuntimeError):
 class SenaiteClient:
     """HTTP client bound to a single SENAITE instance."""
 
-    def __init__(self, settings):
+    def __init__(self, settings, transport=None):
+        """
+        :param settings: the connection :class:`Settings`
+        :param transport: an optional httpx transport, for tests
+        """
         self.settings = settings
         self.api_url = "{}/{}".format(settings.base_url, API_MOUNT)
-        self._client = httpx.Client(
+        self._client = httpx.AsyncClient(
             auth=(settings.username, settings.password),
             timeout=settings.timeout,
             verify=settings.verify_ssl,
             headers={"Accept": "application/json"},
+            transport=transport,
         )
 
-    def close(self):
+    async def close(self):
         """Close the underlying HTTP connection pool."""
-        self._client.close()
+        await self._client.aclose()
 
     # -- low level --------------------------------------------------------
 
-    def request(self, method, path, params=None, payload=None):
+    async def request(self, method, path, params=None, payload=None):
         """Perform a request against the JSON API and unwrap the result.
 
         :param method: HTTP verb (GET, POST, PATCH, DELETE)
@@ -50,7 +60,7 @@ class SenaiteClient:
         :raises SenaiteError: on a non-2xx status or `success: false`
         """
         url = "{}/{}".format(self.api_url, path.lstrip("/"))
-        resp = self._client.request(
+        resp = await self._client.request(
             method, url, params=params, json=payload)
         return self._unwrap(resp)
 
@@ -82,15 +92,15 @@ class SenaiteClient:
 
     # -- high level -------------------------------------------------------
 
-    def version(self):
+    async def version(self):
         """Return the JSON API version envelope."""
-        return self.request("GET", "version")
+        return await self.request("GET", "version")
 
-    def search(self, query=None):
+    async def search(self, query=None):
         """Search content; `query` is a JSON API query mapping."""
-        return self.request("GET", "search", params=query or {})
+        return await self.request("GET", "search", params=query or {})
 
-    def get(self, uid=None, resource=None):
+    async def get(self, uid=None, resource=None):
         """Fetch a record by uid, a resource listing, or one of a kind.
 
         :param uid: 32-char object uid
@@ -104,37 +114,37 @@ class SenaiteClient:
             path = resource
         else:
             raise ValueError("Provide 'uid' and/or 'resource'")
-        return self.request("GET", path)
+        return await self.request("GET", path)
 
-    def create(self, portal_type, parent_path, fields=None):
+    async def create(self, portal_type, parent_path, fields=None):
         """Create an object of `portal_type` inside `parent_path`."""
         payload = dict(fields or {})
         payload["parent_path"] = parent_path
-        return self.request(
+        return await self.request(
             "POST", "{}/create".format(portal_type), payload=payload)
 
-    def update(self, uid, fields):
+    async def update(self, uid, fields):
         """Update the object addressed by `uid` with `fields`."""
-        return self.request("PATCH", uid, payload=dict(fields or {}))
+        return await self.request("PATCH", uid, payload=dict(fields or {}))
 
-    def delete(self, uid):
+    async def delete(self, uid):
         """Delete the object addressed by `uid`."""
-        return self.request("DELETE", uid)
+        return await self.request("DELETE", uid)
 
-    def do_transition(self, uid, transition):
+    async def do_transition(self, uid, transition):
         """Fire a workflow `transition` on the object `uid`."""
-        return self.request(
+        return await self.request(
             "PATCH", uid, payload={"transition": transition})
 
-    def compose_reference(self):
+    async def compose_reference(self):
         """Return what a spec may say, as the composer reports it.
 
         Read from the engine's own tables on the server, so it cannot
         drift from what a compose will actually accept.
         """
-        return self.request("GET", "compose/reference")
+        return await self.request("GET", "compose/reference")
 
-    def compose(self, spec):
+    async def compose(self, spec):
         """Build a whole laboratory from a declarative `spec`.
 
         The route is provided by `senaite.composer`, which resolves the
@@ -146,4 +156,4 @@ class SenaiteClient:
         :returns: the composer report, with what was created, updated
             and skipped
         """
-        return self.request("POST", "compose", payload=spec)
+        return await self.request("POST", "compose", payload=spec)
