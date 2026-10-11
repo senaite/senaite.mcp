@@ -1,26 +1,60 @@
 [project]
 name = "senaite.mcp"
-version = "0.1.0"
+dynamic = ["version"]
 description = "MCP server exposing the SENAITE JSON API to agents"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "GPLv2" }
-authors = [{ name = "Ramon Bartl", email = "rb@ridingbytes.com" }]
-keywords = ["senaite", "lims", "mcp", "jsonapi"]
+license = "GPL-2.0-only"
+license-files = ["LICENSE"]
+authors = [{ name = "RIDING BYTES & NARALABS", email = "senaite@senaite.com" }]
+keywords = ["senaite", "lims", "mcp", "jsonapi", "agent"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+]
 dependencies = [
-    "mcp>=1.2.0",
+    "mcp>=1.10,<2",
     "httpx>=0.27",
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8.0"]
+test = ["pytest>=8.0", "anyio>=4.0", "flake8>=7.0"]
+
+[project.urls]
+Homepage = "https://www.senaite.com"
+Source = "https://github.com/senaite/senaite.mcp"
+Issues = "https://github.com/senaite/senaite.mcp/issues"
+Changelog = "https://github.com/senaite/senaite.mcp/blob/master/CHANGES.md"
 
 [project.scripts]
 senaite-mcp = "senaite_mcp.server:main"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/senaite_mcp/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/senaite_mcp"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/senaite_mcp",
+    "tests",
+    "README.md",
+    "CHANGES.md",
+    "LICENSE",
+    ".env.example",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

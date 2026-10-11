@@ -1,182 +1,154 @@
 # senaite.mcp
 
-An [MCP](https://modelcontextprotocol.io) server that exposes the
-SENAITE JSON API to agents. It is a thin HTTP client: each tool maps to
-one `senaite.jsonapi` v1 route. All orchestration (workflow chains,
-composing a whole lab via `senaite.composer`) lives behind the API in
-SENAITE, not here.
+An [MCP](https://modelcontextprotocol.io) server that lets an agent
+work with a [SENAITE LIMS](https://www.senaite.com) site: search it,
+read and change records, move samples through their workflow, and set
+up a whole laboratory from one declarative spec.
 
-## Quickstart
-
-```bash
-pip install -e .
-export SENAITE_URL=http://localhost:8080/senaite
-senaite-mcp --transport streamable-http --port 7980
-```
-
-Point an MCP host at it (see *Register with an MCP host* below) and
-ask it something. Two tools matter more than the rest:
-
-- `senaite_search` to find anything, by any catalog index.
-- `senaite_compose` to build a whole laboratory from one declarative
-  spec, rather than creating sixty objects one at a time and threading
-  the UIDs between them by hand.
-
-Before writing a spec, call `senaite_compose_reference`. It reports
-which types the composer can place and where it puts each one, what a
-re-run recognises an existing object by, and the keys an item
-understands, read from the server's own tables. A spec written from a
-guess half works, and the half that does not is reported one item at a
-time.
-
-## Architecture
+It is a thin client of the SENAITE JSON API. Each tool maps to one
+`senaite.jsonapi` route, and the server holds no logic of its own
+beyond turning failures into messages an agent can act on. Everything
+the agent does, it does as the SENAITE user the server logs in with,
+with that user's permissions.
 
 ```
-agent ──MCP──> senaite.mcp (py3) ──HTTP──> senaite.jsonapi (Zope, py2.7)
+agent ──MCP──> senaite-mcp (Python 3) ──HTTP──> SENAITE JSON API
 ```
 
-The py2.7 SENAITE stack and this py3 server never share a runtime; they
-talk over HTTP. That boundary is deliberate.
+## Requirements
 
-This project lives at `src/senaite.mcp` in the SENAITE buildout and
-uses its own pyenv virtualenv, kept fully separate from the py2.7
-buildout.
+- Python 3.10 or newer, on any machine that can reach the site
+- a SENAITE 2.x site with `senaite.jsonapi`
+- a SENAITE user for the agent. Give it the roles the agent's work
+  needs and no more: a lab manager login can verify and publish
+- for `senaite_compose`: the `senaite.composer` add-on on the site
 
 ## Install
 
-The virtualenv is pinned via `.python-version`, so pyenv activates it
-automatically inside the project directory:
+With [uv](https://docs.astral.sh/uv/), nothing has to be installed
+first; an MCP host can run the server straight from the repository:
 
 ```bash
-pyenv virtualenv 3.12.12 senaite.mcp     # once
-cd src/senaite.mcp                   # auto-selects the env
-pip install -e ".[test]"
-pyenv rehash                              # expose the senaite-mcp script
+uvx --from git+https://github.com/senaite/senaite.mcp senaite-mcp --help
+```
+
+Or install it into a virtual environment:
+
+```bash
+git clone https://github.com/senaite/senaite.mcp
+cd senaite.mcp
+python3 -m venv .venv
+.venv/bin/pip install -e .
 ```
 
 ## Configure
 
-Set the target instance via environment variables (see `.env.example`).
-Point it at your local SENAITE instance:
+The server reads its connection from environment variables. Copy
+`.env.example` to `.env` in the checkout and fill it in; the scripts
+in `bin/` load it.
 
-- `SENAITE_URL` (required) — site URL, e.g. `http://localhost:8080/senaite`
-- `SENAITE_USERNAME` / `SENAITE_PASSWORD` (required): the login. There
-  is no password flag, because a flag shows up in the process list
-- `SENAITE_TIMEOUT`: seconds per request (default `30`)
-- `SENAITE_COMPOSE_TIMEOUT`: seconds per compose (default `300`)
-- `SENAITE_VERIFY_SSL` — verify TLS certificates (default `true`)
+| Variable                  | Meaning                                    |
+|---------------------------|--------------------------------------------|
+| `SENAITE_URL`             | the site, e.g. `http://lims:8080/senaite`  |
+| `SENAITE_USERNAME`        | the login (required)                       |
+| `SENAITE_PASSWORD`        | its password (required)                    |
+| `SENAITE_TIMEOUT`         | seconds per request, default `30`          |
+| `SENAITE_COMPOSE_TIMEOUT` | seconds per compose, default `300`         |
+| `SENAITE_VERIFY_SSL`      | verify TLS certificates, default `true`    |
 
-## Commands
+`SENAITE_URL` points at the site, not at the server root:
+`http://lims:8080/senaite`, not `http://lims:8080`. The flags `--url`
+and `--username` override the variables, which is how one checkout
+serves several sites. There is no password flag, because a flag shows
+up in the process list.
 
-Convenience wrappers in `bin/` (they load `.env` and use the pyenv env,
-so they work from any directory):
-
-- `bin/serve` — run the MCP server (stdio). This is what an MCP host runs.
-- `bin/check` — smoke-test the connection: print the API version and a
-  few content counts.
-- `bin/test` — run the test suite (extra args pass through to pytest).
-
-## Run
-
-Start your local SENAITE instance first (`bin/instance fg` in the
-buildout root), then verify connectivity:
+Then check the connection:
 
 ```bash
-cd src/senaite.mcp
-bin/check
+bin/check          # or: senaite-mcp --check
 ```
+
+```
+login:   agent
+api_url: http://lims:8080/senaite/@@API/senaite/v1
+version: 2.7.0
+  Client           12
+  ...
+```
+
+The server makes the same login check when it starts. A site answers
+a wrong password as if the caller were anonymous, with empty results
+rather than an error, so the server asks the site who it is talking to
+and stops when the answer is "nobody".
 
 ## Register with an MCP host
 
-Register `bin/serve` as a stdio server. For Claude Code:
+An MCP host starts the server itself and talks to it over stdin and
+stdout. For Claude Code:
 
 ```bash
-claude mcp add senaite -- /Users/rbartl/develop/buildout/src/senaite.mcp/bin/serve
+claude mcp add senaite -- /path/to/senaite.mcp/bin/serve
 ```
 
-Connection settings come from `.env` (copy from `.env.example`). To pass
-them inline instead of using `bin/serve` / `.env`:
+A second site on the same instance is a second entry with its own URL:
+
+```bash
+claude mcp add senaite2 -- /path/to/senaite.mcp/bin/serve \
+  --url http://lims:8080/senaite2
+```
+
+Without a checkout, through uv, with the connection passed in:
 
 ```bash
 claude mcp add senaite \
-  -e SENAITE_URL=http://localhost:8080/senaite \
-  -e SENAITE_USERNAME=admin \
-  -e SENAITE_PASSWORD=admin \
-  -- ~/.pyenv/versions/senaite.mcp/bin/senaite-mcp
+  -e SENAITE_URL=http://lims:8080/senaite \
+  -e SENAITE_USERNAME=agent \
+  -e SENAITE_PASSWORD=secret \
+  -- uvx --from git+https://github.com/senaite/senaite.mcp senaite-mcp
 ```
 
-Each SENAITE site is a separate `SENAITE_URL` (multiple sites on one host
-are addressed by their path, e.g. `.../senaite`). After adding the
-server, restart the MCP host so it picks up the new connection.
-
-## Running over the network
-
-A reachable MCP endpoint grants the caller the **same power over SENAITE
-as this server's credentials** (create, transition, delete). Treat it
-like the credentials themselves. There are two ways to reach a server on
-a remote host, in order of preference:
-
-### 1. SSH-tunnelled stdio (recommended)
-
-Run the server on the remote host (next to its SENAITE) and let the MCP
-host launch it over SSH. No open ports, no new auth — SSH provides the
-transport, encryption and authentication:
-
-```bash
-claude mcp add senaite -- ssh user@remote /path/to/senaite.mcp/bin/serve
-```
-
-The remote `.env` points `SENAITE_URL` at the remote's local site.
-
-### 2. HTTP transport
-
-Run the server as an HTTP service on the remote host:
-
-```bash
-SENAITE_MCP_TRANSPORT=streamable-http SENAITE_MCP_PORT=7980 bin/serve
-```
-
-and connect from the client:
-
-```bash
-claude mcp add --transport http senaite http://remote:7980/mcp
-```
-
-The default bind host is `127.0.0.1` deliberately. The SDK's HTTP
-transport has **no built-in authentication**, so do not bind a public
-interface directly. Put it behind a reverse proxy with TLS and auth, an
-SSH tunnel, or a VPN, and only then set `SENAITE_MCP_HOST=0.0.0.0`.
+Other hosts take the same command and environment in their own
+configuration file. Restart the host after adding a server.
 
 ## Tools
 
-| Tool                    | JSON API route                           |
-|-------------------------|------------------------------------------|
-| `senaite_version`       | `GET /version`                           |
-| `senaite_search`        | `GET /search`                            |
-| `senaite_get`           | `GET /<uid>` or `/<resource>/<uid>`      |
-| `senaite_create`        | `POST /<portal_type>/create`             |
-| `senaite_update`        | `PATCH /<uid>`                           |
-| `senaite_delete`        | `DELETE /<uid>`                          |
-| `senaite_do_transition` | `PATCH /<uid>` with a `transition` field |
-| `senaite_compose_reference` | `GET /compose/reference`             |
-| `senaite_compose`       | `POST /compose`                          |
+| Tool                        | What it does                       |
+|-----------------------------|------------------------------------|
+| `senaite_version`           | API version                        |
+| `senaite_search`            | search by any catalog index        |
+| `senaite_get`               | one object by uid, or a listing    |
+| `senaite_create`            | create one object                  |
+| `senaite_update`            | change fields of one object        |
+| `senaite_do_transition`     | a workflow step, e.g. `receive`    |
+| `senaite_delete`            | deactivate one object (see below)  |
+| `senaite_compose_reference` | what a composer spec may say       |
+| `senaite_compose`           | build a laboratory from a spec     |
 
-The last two need [senaite.composer](https://github.com/ridingbytes/senaite.composer)
-on the target site. Without it the call says so rather than failing
-obscurely.
+Searches and listings come in pages: `count` is the total, `next` is
+empty on the last page, and `b_start` asks for the next one.
 
-### Building a laboratory
+`senaite_delete` removes nothing. SENAITE keeps its records for the
+audit trail, so the JSON API answers a delete with the `deactivate`
+transition, which `activate` reverses. A sample has no `deactivate`;
+it is retired with `cancel` or `invalidate`.
 
-`senaite_compose` takes a mapping with two ordered sections, `setup`
-for the configuration and `content` for clients, contacts and samples.
-Each item names a `portal_type` and its `fields`; an `id` lets a later
-item point at it with `{"ref": "<id>"}`.
+The tools carry MCP annotations: `version`, `search`, `get` and
+`compose_reference` are marked read-only, so a host can let them run
+without asking.
+
+## Building a laboratory
+
+`senaite_compose` takes a spec with two ordered sections: `setup` for
+the configuration and `content` for clients, contacts and samples.
+Each item names a `portal_type` and its `fields`. An `id` lets a later
+item point at it with `{"ref": "<id>"}`, and the composer puts every
+object in the container its type belongs in.
 
 ```json
 {"version": 1,
  "setup": [
-   {"id": "cat", "portal_type": "AnalysisCategory",
-    "fields": {"title": "Chemistry", "department": {"ref": "dept"}}}],
+   {"id": "chem", "portal_type": "AnalysisCategory",
+    "fields": {"title": "Chemistry"}}],
  "content": [
    {"id": "acme", "portal_type": "Client",
     "fields": {"title": "ACME", "ClientID": "ACME"}}]}
@@ -184,52 +156,108 @@ item point at it with `{"ref": "<id>"}`.
 
 Runs are idempotent: sending the same spec twice updates what is there
 instead of duplicating it, so an agent can correct one item and send
-the whole thing again. The answer reports what was created, updated,
-skipped and, per item, what failed.
+the whole spec again. The answer reports what was created, updated
+and skipped and, per item, what failed.
 
-Two rules decide most of the errors. The `setup` section is composed
-before `content`, so anything the setup points at has to be in it. And
-an item has to come after whatever it references.
+An agent does not have to guess the keys. `senaite_compose_reference`
+returns the sections, the item keys, the container of each type and
+what a re-run recognises an object by, generated from the composer's
+own tables. The spec format itself is documented in
+[senaite.composer](https://github.com/senaite/senaite.composer).
 
-The REST verbs (`PATCH` / `DELETE`) require senaite.jsonapi with the
-REST-verb support and a JSON API framework that lets those verbs through
-(plone.jsonapi.core >= 0.8.0).
+## Running over the network
+
+A reachable MCP endpoint gives whoever reaches it the same power over
+SENAITE as the server's login. Treat it like the login itself. Two
+ways to use a server on another machine, the first one preferred:
+
+### SSH
+
+The host starts the server on the remote machine over SSH. No port is
+opened, and SSH does the encryption and the authentication:
+
+```bash
+claude mcp add senaite -- ssh lims.example.com /opt/senaite.mcp/bin/serve
+```
+
+The remote `.env` points `SENAITE_URL` at the site on that machine.
+
+### HTTP
+
+The server can listen for HTTP itself:
+
+```bash
+senaite-mcp --transport streamable-http --port 7980
+```
+
+```bash
+claude mcp add --transport http senaite http://localhost:7980/mcp
+```
+
+The MCP HTTP transport has no authentication of its own, so the
+server binds to `127.0.0.1` by default. Bound there it also refuses
+any request whose Host header is not localhost, which protects it
+against DNS rebinding. To serve other machines, put it behind a
+reverse proxy that does TLS and authentication, and list the name
+the proxy forwards:
+
+```bash
+senaite-mcp --transport streamable-http --allowed-host mcp.example.com
+```
+
+`--host 0.0.0.0` makes it listen on every interface and accept any
+Host header. Do that only inside a network you trust, such as a VPN.
+
+| Variable                    | Flag             | Default     |
+|-----------------------------|------------------|-------------|
+| `SENAITE_MCP_TRANSPORT`     | `--transport`    | `stdio`     |
+| `SENAITE_MCP_HOST`          | `--host`         | `127.0.0.1` |
+| `SENAITE_MCP_PORT`          | `--port`         | `7980`      |
+| `SENAITE_MCP_ALLOWED_HOSTS` | `--allowed-host` | none        |
+
+`SENAITE_MCP_ALLOWED_HOSTS` takes a comma-separated list; the flag is
+repeated instead.
 
 ## Troubleshooting
 
-**`404` on `/compose` or `/compose/reference`.** The route belongs to
-senaite.composer, which is installed per site rather than per
-instance. Install it from `Site Setup` -> `Add-ons` on that site. The
-client says which add-on is missing rather than passing the raw 404
-on.
+The server puts the HTTP status and the likely cause into every error
+message, because a host passes the message to the agent and nothing
+else.
 
-**`401` on every call.** The credentials are wrong, or the instance
-answers on a different site id than the one in `SENAITE_URL`. The URL
-has to point at the site, not at the Zope root:
-`http://localhost:8080/senaite`, not `http://localhost:8080`.
+**"does not accept the login" at startup.** The username or password
+is wrong. The site would have answered every call with empty results.
 
-**`405` on an update or a delete.** The target runs a JSON API
-framework that does not let `PATCH` and `DELETE` through. That needs
-plone.jsonapi.core 0.8.0 or newer.
+**"Redirected instead of answered".** The site sent the request to its
+login form: wrong credentials, or `SENAITE_URL` is not a site.
 
-**`500` where `400` was expected.** An older senaite.jsonapi renders a
-refused field value as a server error. The message is still the field
-and the reason; only the status is misleading.
+**"500 Internal Server Error: Unable to get the portal object".**
+`SENAITE_URL` points at the server root rather than at a site.
 
-**A field that is silently not set.** An older senaite.jsonapi logs an
-unknown field name and answers that all was well. Check the object
-back with `senaite_get`: what came back is what was stored.
+**"No composer on this site".** `senaite.composer` is not installed on
+that site. Add-ons are installed per site, not per server.
 
-**An agent guessing at spec keys.** It does not have to. Ask
-`senaite_compose_reference` first: the answer is generated from the
-composer's own constants, so it lists the sections, the item keys, the
-container locations and the natural keys as the running code has them.
+**`405` on an update or a delete.** The site's JSON API does not let
+`PATCH` and `DELETE` through. That needs `senaite.jsonapi` 2.7 or
+newer, with `plone.jsonapi.core` 0.8 or newer.
 
-## Tests
+**A field that is silently not set.** An older `senaite.jsonapi` skips
+a field name it does not know and answers that all went well. Read the
+object back with `senaite_get`: what comes back is what was stored.
+
+**`421 Misdirected Request` over HTTP.** The Host header is not one
+the server accepts. Add it with `--allowed-host`.
+
+## Development
 
 ```bash
-pytest
+python3 -m venv .venv
+.venv/bin/pip install -e ".[test]"
+bin/test           # flake8, then pytest; arguments go to pytest
 ```
 
-The bundled tests are offline: they assert that each client method maps
-to the correct route without contacting a live instance.
+The tests run offline. An httpx mock transport stands in for the
+site, so they check every request as it would go over the wire.
+
+## License
+
+GPLv2, see [LICENSE](LICENSE).
