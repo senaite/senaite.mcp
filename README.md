@@ -21,7 +21,9 @@ agent ──MCP──> senaite-mcp (Python 3) ──HTTP──> SENAITE JSON API
 - a SENAITE 2.x site with `senaite.jsonapi`
 - a SENAITE user for the agent. Give it the roles the agent's work
   needs and no more: a lab manager login can verify and publish
-- for `senaite_compose`: the `senaite.composer` add-on on the site
+- for `senaite_compose`: the `senaite.composer` add-on on the site,
+  and a login holding `Manager`, since a spec creates users and grants
+  roles
 
 ## Install
 
@@ -233,8 +235,16 @@ login form: wrong credentials, or `SENAITE_URL` is not a site.
 **"500 Internal Server Error: Unable to get the portal object".**
 `SENAITE_URL` points at the server root rather than at a site.
 
-**"No composer on this site".** `senaite.composer` is not installed on
-that site. Add-ons are installed per site, not per server.
+**"senaite.composer is not installed on this site"**, or **"No composer
+on this site"** from an older composer. Add-ons are installed per
+site, not per server.
+
+**`403` on a compose.** Composing needs the permission
+`senaite.composer: Compose`, which only `Manager` holds.
+
+**`400` on a compose, before anything was built.** The spec does not
+validate. The message names the problem and the item, e.g. a missing
+`version`, an unknown key or two items with the same id.
 
 **`405` on an update or a delete.** The site's JSON API does not let
 `PATCH` and `DELETE` through. That needs `senaite.jsonapi` 2.7 or
