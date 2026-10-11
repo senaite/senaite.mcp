@@ -164,8 +164,11 @@ and skipped and, per item, what failed.
 An agent does not have to guess the keys. `senaite_compose_reference`
 returns the sections, the item keys, the container of each type and
 what a re-run recognises an object by, generated from the composer's
-own tables. The spec format itself is documented in
-[senaite.composer](https://github.com/senaite/senaite.composer).
+own tables.
+
+`senaite.composer` is a separate add-on and is not published with this
+server. On a site without it, the two compose tools answer that it is
+missing; every other tool works the same.
 
 ## Running over the network
 
