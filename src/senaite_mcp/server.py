@@ -27,13 +27,13 @@ def client():
 
 
 @mcp.tool()
-def senaite_version() -> dict:
+async def senaite_version() -> dict:
     """Return the SENAITE JSON API version and endpoint info."""
-    return client().version()
+    return await client().version()
 
 
 @mcp.tool()
-def senaite_search(
+async def senaite_search(
     portal_type: str = "",
     query: Optional[dict] = None,
     limit: int = 25,
@@ -48,21 +48,21 @@ def senaite_search(
     if portal_type:
         params["portal_type"] = portal_type
     params.setdefault("limit", limit)
-    return client().search(params)
+    return await client().search(params)
 
 
 @mcp.tool()
-def senaite_get(uid: str = "", resource: str = "") -> dict:
+async def senaite_get(uid: str = "", resource: str = "") -> dict:
     """Fetch a record by uid, or list a resource / portal_type.
 
     :param uid: 32-char object uid
     :param resource: plural resource or portal_type name
     """
-    return client().get(uid=uid or None, resource=resource or None)
+    return await client().get(uid=uid or None, resource=resource or None)
 
 
 @mcp.tool()
-def senaite_create(
+async def senaite_create(
     portal_type: str,
     parent_path: str,
     fields: Optional[dict] = None,
@@ -74,34 +74,34 @@ def senaite_create(
         `/senaite/clients`
     :param fields: field values for the new object
     """
-    return client().create(portal_type, parent_path, fields or {})
+    return await client().create(portal_type, parent_path, fields or {})
 
 
 @mcp.tool()
-def senaite_update(uid: str, fields: dict) -> dict:
+async def senaite_update(uid: str, fields: dict) -> dict:
     """Update the object addressed by `uid` with `fields`."""
-    return client().update(uid, fields)
+    return await client().update(uid, fields)
 
 
 @mcp.tool()
-def senaite_delete(uid: str) -> dict:
+async def senaite_delete(uid: str) -> dict:
     """Delete the object addressed by `uid`."""
-    return client().delete(uid)
+    return await client().delete(uid)
 
 
 @mcp.tool()
-def senaite_do_transition(uid: str, transition: str) -> dict:
+async def senaite_do_transition(uid: str, transition: str) -> dict:
     """Fire a workflow transition on an object.
 
     :param uid: 32-char object uid
     :param transition: workflow transition id, e.g. `receive`, `submit`,
         `verify`, `publish`
     """
-    return client().do_transition(uid, transition)
+    return await client().do_transition(uid, transition)
 
 
 @mcp.tool()
-def senaite_compose_reference() -> dict:
+async def senaite_compose_reference() -> dict:
     """Return what a composer spec may say on this site.
 
     Read this before writing a spec. It reports the types the composer
@@ -113,11 +113,11 @@ def senaite_compose_reference() -> dict:
     compose will actually accept rather than what a document says it
     should.
     """
-    return client().compose_reference()
+    return await client().compose_reference()
 
 
 @mcp.tool()
-def senaite_compose(spec: dict) -> dict:
+async def senaite_compose(spec: dict) -> dict:
     """Build a laboratory from a declarative spec, in one call.
 
     This is the tool to reach for when the task is "set up a lab", not
@@ -137,7 +137,7 @@ def senaite_compose(spec: dict) -> dict:
 
     :param spec: the composer spec as a mapping
     """
-    return client().compose(spec)
+    return await client().compose(spec)
 
 
 def parse_args(argv=None):

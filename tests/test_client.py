@@ -1,97 +1,137 @@
 # -*- coding: utf-8 -*-
 """Offline tests: verify each client method maps to the right route.
 
-These do not hit a live instance; they capture the (method, path,
-params, payload) that `request` would send and assert the JSON API
-contract.
+These do not hit a live instance. An httpx mock transport records the
+request the client really sends, so the URL, the verb, the query and
+the body are checked as they would go over the wire.
 """
 
+import json
+
+import httpx
 import pytest
 
 from senaite_mcp.client import SenaiteClient
 from senaite_mcp.config import Settings
 
+pytestmark = pytest.mark.anyio
+
+API = "/senaite/@@API/senaite/v1"
+UID = "a" * 32
+
+
+class Recorder:
+    """Answer every request with `{"ok": true}` and keep what was sent."""
+
+    def __init__(self):
+        self.requests = []
+
+    def __call__(self, request):
+        self.requests.append(request)
+        return httpx.Response(200, json={"ok": True})
+
+    @property
+    def last(self):
+        return self.requests[-1]
+
+
+def body(request):
+    """Return the JSON body of a recorded request, or None."""
+    if not request.content:
+        return None
+    return json.loads(request.content)
+
 
 @pytest.fixture
-def client(monkeypatch):
+def recorder():
+    return Recorder()
+
+
+@pytest.fixture
+async def client(recorder):
     settings = Settings(base_url="http://nohost/senaite")
-    c = SenaiteClient(settings)
-    calls = []
-
-    def fake_request(method, path, params=None, payload=None):
-        calls.append((method, path, params, payload))
-        return {"ok": True}
-
-    monkeypatch.setattr(c, "request", fake_request)
-    c.calls = calls
-    return c
+    c = SenaiteClient(settings, transport=httpx.MockTransport(recorder))
+    yield c
+    await c.close()
 
 
-def test_api_url(client):
+async def test_api_url(client):
     assert client.api_url == "http://nohost/senaite/@@API/senaite/v1"
 
 
-def test_version(client):
-    client.version()
-    assert client.calls[-1] == ("GET", "version", None, None)
+async def test_version(client, recorder):
+    await client.version()
+    assert recorder.last.method == "GET"
+    assert recorder.last.url.path == API + "/version"
 
 
-def test_search(client):
-    client.search({"portal_type": "Client", "limit": 5})
-    method, path, params, _ = client.calls[-1]
-    assert (method, path) == ("GET", "search")
-    assert params == {"portal_type": "Client", "limit": 5}
+async def test_search(client, recorder):
+    await client.search({"portal_type": "Client", "limit": 5})
+    assert recorder.last.url.path == API + "/search"
+    assert dict(recorder.last.url.params) == {
+        "portal_type": "Client", "limit": "5"}
 
 
-def test_get_by_uid(client):
-    client.get(uid="a" * 32)
-    assert client.calls[-1] == ("GET", "a" * 32, None, None)
+async def test_get_by_uid(client, recorder):
+    await client.get(uid=UID)
+    assert recorder.last.url.path == API + "/" + UID
 
 
-def test_get_resource_and_uid(client):
-    client.get(uid="a" * 32, resource="Client")
-    assert client.calls[-1][1] == "Client/" + "a" * 32
+async def test_get_resource_and_uid(client, recorder):
+    await client.get(uid=UID, resource="Client")
+    assert recorder.last.url.path == API + "/Client/" + UID
 
 
-def test_get_resource_listing(client):
-    client.get(resource="Client")
-    assert client.calls[-1] == ("GET", "Client", None, None)
+async def test_get_resource_listing(client, recorder):
+    await client.get(resource="Client")
+    assert recorder.last.url.path == API + "/Client"
 
 
-def test_get_requires_argument(client):
+async def test_get_requires_argument(client):
     with pytest.raises(ValueError):
-        client.get()
+        await client.get()
 
 
-def test_create(client):
-    client.create("Client", "/senaite/clients", {"title": "ACME"})
-    method, path, _, payload = client.calls[-1]
-    assert (method, path) == ("POST", "Client/create")
-    assert payload == {"title": "ACME", "parent_path": "/senaite/clients"}
+async def test_create(client, recorder):
+    await client.create("Client", "/senaite/clients", {"title": "ACME"})
+    assert recorder.last.method == "POST"
+    assert recorder.last.url.path == API + "/Client/create"
+    assert body(recorder.last) == {
+        "title": "ACME", "parent_path": "/senaite/clients"}
 
 
-def test_update(client):
-    client.update("a" * 32, {"title": "New"})
-    assert client.calls[-1] == ("PATCH", "a" * 32, None, {"title": "New"})
+async def test_update(client, recorder):
+    await client.update(UID, {"title": "New"})
+    assert recorder.last.method == "PATCH"
+    assert recorder.last.url.path == API + "/" + UID
+    assert body(recorder.last) == {"title": "New"}
 
 
-def test_delete(client):
-    client.delete("a" * 32)
-    assert client.calls[-1] == ("DELETE", "a" * 32, None, None)
+async def test_delete(client, recorder):
+    await client.delete(UID)
+    assert recorder.last.method == "DELETE"
+    assert recorder.last.url.path == API + "/" + UID
 
 
-def test_do_transition(client):
-    client.do_transition("a" * 32, "receive")
-    assert client.calls[-1] == (
-        "PATCH", "a" * 32, None, {"transition": "receive"})
+async def test_do_transition(client, recorder):
+    await client.do_transition(UID, "receive")
+    assert recorder.last.method == "PATCH"
+    assert body(recorder.last) == {"transition": "receive"}
 
 
-def test_compose(client):
+async def test_compose(client, recorder):
     spec = {"version": 1, "setup": [], "content": []}
-    client.compose(spec)
-    assert client.calls[-1] == ("POST", "compose", None, spec)
+    await client.compose(spec)
+    assert recorder.last.method == "POST"
+    assert recorder.last.url.path == API + "/compose"
+    assert body(recorder.last) == spec
 
 
-def test_compose_reference(client):
-    client.compose_reference()
-    assert client.calls[-1] == ("GET", "compose/reference", None, None)
+async def test_compose_reference(client, recorder):
+    await client.compose_reference()
+    assert recorder.last.url.path == API + "/compose/reference"
+
+
+async def test_sends_credentials(client, recorder):
+    await client.version()
+    assert recorder.last.headers["Authorization"].startswith("Basic ")

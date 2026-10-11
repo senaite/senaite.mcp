@@ -16,14 +16,23 @@ fi
 
 PYENV_ROOT="${PYENV_ROOT:-$HOME/.pyenv}"
 exec "$PYENV_ROOT/versions/senaite.mcp/bin/python" - <<'PY'
+import asyncio
+
 from senaite_mcp.config import Settings
 from senaite_mcp.client import SenaiteClient
 
-client = SenaiteClient(Settings.from_env())
-print("api_url: %s" % client.api_url)
-print("version: %s" % client.version().get("version"))
-for portal_type in ("Client", "Contact", "AnalysisService", "AnalysisRequest"):
-    count = client.search({"portal_type": portal_type, "limit": 1}).get("count")
-    print("  %-16s %s" % (portal_type, count))
-client.close()
+TYPES = ("Client", "Contact", "AnalysisService", "AnalysisRequest")
+
+
+async def check():
+    client = SenaiteClient(Settings.from_env())
+    print("api_url: %s" % client.api_url)
+    version = await client.version()
+    print("version: %s" % version.get("version"))
+    for portal_type in TYPES:
+        found = await client.search({"portal_type": portal_type, "limit": 1})
+        print("  %-16s %s" % (portal_type, found.get("count")))
+    await client.close()
+
+asyncio.run(check())
 PY
